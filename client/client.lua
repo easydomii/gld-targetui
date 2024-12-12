@@ -1,157 +1,83 @@
-local targetInfo = {
-    entity = nil,
+local cache = {
+    target = nil,
     health = nil,
     maxHealth = nil,
-    lastUpdate = 0
+    lastUpdate = 0,
+    playerHealth = nil,
+    lastHealthCheck = 0
 }
+
 local deadEntities = {}
-local playerHealth = nil
-local lastHealthCheck = 0
 
--- Cache des natives pour de meilleures performances
-local GetEntityHealth = GetEntityHealth
-local IsPedDeadOrDying = IsPedDeadOrDying
-local DoesEntityExist = DoesEntityExist
+-- Cache des natives les plus utilisées
 local PlayerPedId = PlayerPedId
+local GetEntityHealth = GetEntityHealth
 local GetEntityCoords = GetEntityCoords
+local DoesEntityExist = DoesEntityExist
 local GetGameTimer = GetGameTimer
-local pairs = pairs
-local Wait = Wait
+local IsPlayerFreeAiming = IsPlayerFreeAiming
+local IsPedInMeleeCombat = IsPedInMeleeCombat
+local GetEntityForwardVector = GetEntityForwardVector
 
-function getEntityScreenCoordsUsingCenter(entity)
-    if not DoesEntityExist(entity) then return nil, nil end
-    local coords = GetEntityCoords(entity)
-    local onScreen, x, y = GetScreenCoordFromWorldCoord(coords.x, coords.y, coords.z + 1.0)
-    return onScreen and x * GetActiveScreenResolution(), y * GetActiveScreenResolution() or nil, nil
-end
-
-function cleanupTarget()
-    if targetInfo.entity then
-        SendNUIMessage({
-            type = "hideHealthBar",
-            entityId = targetInfo.entity
-        })
-        targetInfo.entity = nil
-        targetInfo.health = nil
-        targetInfo.maxHealth = nil
-        targetInfo.lastUpdate = 0
+function getMeleeFocusTarget(ped)
+    local coords = GetEntityCoords(ped)
+    local heading = GetEntityHeading(ped)
+    
+    -- Convertir le heading en radians et calculer le vecteur de direction
+    local headingRad = math.rad(heading)
+    local forwardX = -math.sin(headingRad)
+    local forwardY = math.cos(headingRad)
+    
+    -- Point final du raycast (3 unités devant le joueur)
+    local endCoords = vec3(
+        coords.x + forwardX * 3.0,
+        coords.y + forwardY * 3.0,
+        coords.z
+    )
+    
+    -- Lancer un raycast devant le joueur
+    local ray = StartShapeTestRay(
+        coords.x, coords.y, coords.z + 0.5,
+        endCoords.x, endCoords.y, endCoords.z + 0.5,
+        -1, ped, 0
+    )
+    
+    local _, hit, hitCoords, _, hitEntity = GetShapeTestResult(ray)
+    
+    if hit and DoesEntityExist(hitEntity) and IsEntityAPed(hitEntity) and not IsPedAPlayer(hitEntity) then
+        return hitEntity
     end
-end
-
-function getClosestTarget(coords, maxDistance)
-    local closestPed, closestDistance = nil, maxDistance
-    local maxDistanceSquared = maxDistance * maxDistance
-
-    for ped in pairs(GetGamePool('CPed')) do
-        if DoesEntityExist(ped) and not IsPedAPlayer(ped) and not IsPedDeadOrDying(ped) then
-            local pedCoords = GetEntityCoords(ped)
-            local distanceSquared = #(coords - pedCoords)
+    
+    -- Si le raycast ne trouve rien, chercher le PED le plus proche devant nous
+    local closestPed = nil
+    local closestDist = 3.0
+    
+    for target in pairs(GetGamePool('CPed')) do
+        if DoesEntityExist(target) and not IsPedAPlayer(target) and not IsPedDeadOrDying(target) then
+            local targetCoords = GetEntityCoords(target)
+            local dist = #(coords - targetCoords)
             
-            if distanceSquared < maxDistanceSquared and distanceSquared < closestDistance then
-                closestDistance = distanceSquared
-                closestPed = ped
+            if dist < closestDist then
+                -- Vérifier si le PED est devant nous
+                local dx = targetCoords.x - coords.x
+                local dy = targetCoords.y - coords.y
+                
+                -- Calculer l'angle entre la direction du joueur et la direction vers la cible
+                local targetAngle = math.deg(math.atan2(dx, dy))
+                local angleDiff = math.abs((targetAngle - heading + 180) % 360 - 180)
+                
+                if angleDiff < 60 then -- 60 degrés de chaque côté
+                    closestDist = dist
+                    closestPed = target
+                end
             end
         end
     end
-
+    
     return closestPed
 end
 
-function handleTarget(target)
-    if not target or not DoesEntityExist(target) then
-        cleanupTarget()
-        return false
-    end
-
-    -- Vérifier si le PED est mort
-    if IsPedDeadOrDying(target) then
-        if not deadEntities[target] then
-            local x, y = getEntityScreenCoordsUsingCenter(target)
-            if x and y then
-                deadEntities[target] = true
-                SendNUIMessage({
-                    type = "showXP",
-                    amount = IsPedHuman(target) and "45" or "10",
-                    x = x,
-                    y = y
-                })
-            end
-        end
-        cleanupTarget()
-        return false
-    end
-
-    local currentTime = GetGameTimer()
-    if currentTime - targetInfo.lastUpdate < 50 then return true end
-    targetInfo.lastUpdate = currentTime
-
-    -- Mise à jour des infos de la cible si nouvelle
-    if target ~= targetInfo.entity then
-        targetInfo.entity = target
-        targetInfo.maxHealth = GetPedMaxHealth(target) - 100
-    end
-
-    -- Obtention des coordonnées et santé actuelles
-    local health = GetEntityHealth(target) - 100
-    local x, y = getEntityScreenCoordsUsingCenter(target)
-    
-    -- Si on ne peut pas obtenir les coordonnées écran ou que la santé a changé
-    if not x or not y then
-        cleanupTarget()
-        return false
-    end
-
-    -- Mise à jour de la barre de vie uniquement si nécessaire
-    if health ~= targetInfo.health then
-        SendNUIMessage({
-            type = "updateHealthBar",
-            entityId = target,
-            currentHealth = health,
-            maxHealth = targetInfo.maxHealth,
-            previousHealth = targetInfo.health,
-            x = x,
-            y = y
-        })
-        targetInfo.health = health
-    else
-        -- Mettre à jour la position même si la santé n'a pas changé
-        SendNUIMessage({
-            type = "updateHealthBar",
-            entityId = target,
-            currentHealth = health,
-            maxHealth = targetInfo.maxHealth,
-            previousHealth = health,
-            x = x,
-            y = y
-        })
-    end
-
-    return true
-end
-
-function checkPlayerHealth()
-    local currentTime = GetGameTimer()
-    if currentTime - lastHealthCheck < 100 then return end
-    lastHealthCheck = currentTime
-
-    local currentHealth = GetEntityHealth(PlayerPedId()) - 100
-    if currentHealth ~= playerHealth then
-        if playerHealth and currentHealth < playerHealth then
-            local x, y = getEntityScreenCoordsUsingCenter(PlayerPedId())
-            if x and y then
-                SendNUIMessage({
-                    type = "showPlayerDamage",
-                    damage = playerHealth - currentHealth,
-                    x = x,
-                    y = y
-                })
-            end
-        end
-        playerHealth = currentHealth
-    end
-end
-
-function getEntityScreenCoordsUsingCenter(entity)
+function getScreenCoords(entity)
     if not DoesEntityExist(entity) then return nil, nil end
     
     local coords = GetEntityCoords(entity)
@@ -159,43 +85,117 @@ function getEntityScreenCoordsUsingCenter(entity)
     local onScreen, x, y = GetScreenCoordFromWorldCoord(coords.x, coords.y, coords.z + 1.0, screenX, screenY)
     
     if onScreen then
-        -- Les coordonnées retournées sont entre 0 et 1, il faut les multiplier par la résolution
-        x = x * screenX
-        y = y * screenY
-        return math.floor(x), math.floor(y)
+        return math.floor(x * screenX), math.floor(y * screenY)
     end
-    
     return nil, nil
+end
+
+function cleanupTarget()
+    if cache.target then
+        SendNUIMessage({
+            type = "hideHealthBar",
+            entityId = cache.target
+        })
+        cache.target = nil
+        cache.health = nil
+        cache.maxHealth = nil
+    end
+end
+
+function updateTarget(target)
+    if not target or not DoesEntityExist(target) then 
+        cleanupTarget()
+        return 
+    end
+
+    if IsPedDeadOrDying(target) then
+        if not deadEntities[target] then
+            local x, y = getScreenCoords(target)
+            if x and y then
+                deadEntities[target] = true
+                SendNUIMessage({
+                    type = "showXP",
+                    amount = IsPedHuman(target) and "45" or "10",
+                    x = x, y = y
+                })
+            end
+        end
+        cleanupTarget()
+        return
+    end
+
+    local currentTime = GetGameTimer()
+    if currentTime - cache.lastUpdate < 50 then return end
+    cache.lastUpdate = currentTime
+
+    local health = GetEntityHealth(target) - 100
+    local x, y = getScreenCoords(target)
+    
+    if not x then 
+        cleanupTarget()
+        return 
+    end
+
+    if target ~= cache.target then
+        cleanupTarget()
+        cache.target = target
+        cache.maxHealth = GetPedMaxHealth(target) - 100
+    end
+
+    SendNUIMessage({
+        type = "updateHealthBar",
+        entityId = target,
+        currentHealth = health,
+        maxHealth = cache.maxHealth,
+        previousHealth = cache.health,
+        x = x, y = y
+    })
+    cache.health = health
 end
 
 CreateThread(function()
     while true do
         local sleep = 250
-        local isActive = false
         local ped = PlayerPedId()
+        local target = nil
 
-        checkPlayerHealth()
-
-        if IsPlayerFreeAiming(PlayerId()) or IsPedInMeleeCombat(ped) then
-            isActive = true
-            sleep = 0
-            local target = nil
-
-            if IsPlayerFreeAiming(PlayerId()) then
-                local bool, entity = GetEntityPlayerIsFreeAimingAt(PlayerId())
-                if bool and IsEntityAPed(entity) and not IsPedAPlayer(entity) then
-                    target = entity
+        -- Vérification de la santé du joueur (toutes les 100ms)
+        local currentTime = GetGameTimer()
+        if currentTime - cache.lastHealthCheck >= 100 then
+            cache.lastHealthCheck = currentTime
+            local health = GetEntityHealth(ped) - 100
+            
+            if health ~= cache.playerHealth and cache.playerHealth and health < cache.playerHealth then
+                local x, y = getScreenCoords(ped)
+                if x then
+                    SendNUIMessage({
+                        type = "showPlayerDamage",
+                        damage = cache.playerHealth - health,
+                        x = x, y = y
+                    })
                 end
-            else
-                target = getClosestTarget(GetEntityCoords(ped), 3.0)
             end
+            cache.playerHealth = health
+        end
 
-            if target then
-                handleTarget(target)
+        -- Détection de cible différente selon le mode
+        if IsPedInMeleeCombat(ped) then
+            -- Mode corps à corps : basé sur la direction du joueur
+            sleep = 0
+            target = getMeleeFocusTarget(ped)
+        elseif IsPlayerFreeAiming(PlayerId()) then
+            -- Mode visée : nécessite un viseur précis
+            sleep = 0
+            local bool, entity = GetEntityPlayerIsFreeAimingAt(PlayerId())
+            if bool and IsEntityAPed(entity) and not IsPedAPlayer(entity) then
+                target = entity
             end
         end
 
-        if not isActive and targetInfo.entity then
+        -- Mise à jour ou nettoyage de la cible
+        if target then
+            updateTarget(target)
+        elseif cache.target then
             cleanupTarget()
         end
 
