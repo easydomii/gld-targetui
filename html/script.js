@@ -40,12 +40,21 @@ function updateHealthBarColor(healthBar, percentage) {
 function hideHealthBar(entityId) {
     let healthBar = document.getElementById("healthBar" + entityId);
     if (healthBar) {
-        healthBar.style.display = "none";
-        healthBar.remove();
+        healthBar.classList.remove('visible');
+        setTimeout(() => {
+            if (healthBar.parentNode) {
+                healthBar.style.display = "none";
+                healthBar.remove();
+            }
+        }, 200);
     }
     if (currentEntityId === entityId) {
         currentEntityId = null;
     }
+}
+
+function lerp(start, end, factor) {
+    return start + (end - start) * factor;
 }
 
 window.addEventListener('message', function(event) {
@@ -71,11 +80,24 @@ window.addEventListener('message', function(event) {
             `;
             $('.wrapper').append(newHealthBar);
             healthBar = document.getElementById("healthBar" + entityId);
+            healthBar.style.left = `${data.x}px`;
+            healthBar.style.top = `${data.y}px`;
         }
 
-        healthBar.style.left = data.x + "px";
-        healthBar.style.top = data.y + "px";
-        healthBar.style.display = "block";
+        // Position avec lerp pour un mouvement plus fluide
+        const currentLeft = parseFloat(healthBar.style.left) || data.x;
+        const currentTop = parseFloat(healthBar.style.top) || data.y;
+        const targetLeft = data.x;
+        const targetTop = data.y;
+
+        healthBar.style.left = `${lerp(currentLeft, targetLeft, 0.3)}px`;
+        healthBar.style.top = `${lerp(currentTop, targetTop, 0.3)}px`;
+
+        if (!healthBar.classList.contains('visible')) {
+            healthBar.style.display = "block";
+            void healthBar.offsetWidth; // Force reflow
+            healthBar.classList.add('visible');
+        }
 
         let healthBarInner = document.getElementById("healthBarInner" + entityId);
         let healthPercentage = (data.currentHealth / data.maxHealth) * 100;
@@ -94,6 +116,11 @@ window.addEventListener('message', function(event) {
         currentEntityId = entityId;
     } else if (data.type === 'showPlayerDamage') {
         createFloatingText(data.x, data.y - 50, Math.floor(data.damage), 'player-damage');
+        
+        const damageEffect = document.getElementById('damage-effect');
+        damageEffect.classList.remove('active');
+        void damageEffect.offsetWidth;
+        damageEffect.classList.add('active');
     } else if (data.type === 'showXP') {
         createFloatingText(data.x, data.y - 50, data.amount, 'xp');
     } else if (data.type === 'hideHealthBar') {
