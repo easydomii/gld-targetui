@@ -4,18 +4,25 @@
     height: 0.8vh;
     background-color: rgb(0 0 0 / 69%);
     border-radius: 20px;
-    overflow: visible;  /* Changé pour que l'icône puisse déborder */
+    overflow: visible;
     display: none;
     transform: translate(-50%, -50%);
     padding: 0.3vh;
     padding-left: 1.7vh;
     box-shadow: 0 0 10px #0000001a;
+    transition: all 0.1s ease-out;
+    opacity: 0;
+}
+
+.health-bar.visible {
+    opacity: 1;
+    animation: fadeIn 0.2s ease-out forwards;
 }
 
 .health-bar-inner {
     height: 100%;
     border-radius: 20px;
-    transition: all 0.2s;
+    transition: all 0.2s ease-out;
     background-color: var(--health);
     box-shadow: 0 0 10px var(--health);
 }
@@ -27,8 +34,9 @@
     transform: translateY(-50%);
     width: 1.1vh;
     height: 1.1vh;
-    filter: brightness(0) invert(1);  /* Pour rendre l'icône blanche */
+    filter: brightness(0) invert(1);
     z-index: 1;
+    transition: all 0.1s ease-out;
 }
 
 .health-bar-text {
@@ -42,6 +50,7 @@
     text-align: center;
     white-space: nowrap;
     text-shadow: 0 0 5px black;
+    transition: all 0.1s ease-out;
 }
 
 .floating-damage, .floating-xp {
@@ -75,6 +84,17 @@
     text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
 }
 
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, calc(-50% - 10px));
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%);
+    }
+}
+
 @keyframes floatUp {
     0% {
         transform: translateY(0);
@@ -94,4 +114,29 @@
     font-size: 2.0vh;
     font-weight: bold;
     text-shadow: 0 0 5px rgba(255, 0, 0, 0.5);
+}
+
+#damage-effect {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 0, 0, 0.1);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 9999;
+}
+
+#damage-effect.active {
+    animation: damageFlash 0.3s ease-out;
+}
+
+@keyframes damageFlash {
+    0% {
+        opacity: 0.3;
+    }
+    100% {
+        opacity: 0;
+    }
 }
