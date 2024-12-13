@@ -113,11 +113,16 @@ function updateTarget(target)
             local x, y = getScreenCoords(target)
             if x and y then
                 deadEntities[target] = true
-                SendNUIMessage({
-                    type = "showXP",
-                    amount = IsPedHuman(target) and "45" or "10",
-                    x = x, y = y
-                })
+                if Config.XP.enabled then
+                    SendNUIMessage({
+                        type = "showXP",
+                        amount = IsPedHuman(target) and tostring(Config.XP.human) or tostring(Config.XP.animal),
+                        x = x,
+                        y = y
+                    })
+                else
+                    print("Le système d'XP est désactivé.")
+                end
             end
         end
         cleanupTarget()
